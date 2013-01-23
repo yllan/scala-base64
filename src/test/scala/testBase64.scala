@@ -12,7 +12,7 @@ class testBase64 extends FunSuite{
   }
 
   test("toBinarySeq") {
-    assert(Base64.toBinarySeq(8)("ABCDEFG" getBytes).toList.mkString == "01000001010000100100001101000100010001010100011001000111")
+    assert(Base64.toBinarySeq(8)("ABCDEFG".getBytes).toList.mkString == "01000001010000100100001101000100010001010100011001000111")
   }
 
   test("binaryToDecimal") {
