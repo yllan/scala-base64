@@ -2,14 +2,32 @@ package com.github.tototoshi.base64
 
 object Base64 {
   val encodeTable = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-
+  val decodeTable = encodeTable.zipWithIndex.toMap
   def encode(fromBytes: Seq[Byte]) : String = {
-    val encoded =
-      group6Bits(fromBytes)
-      .map(x => encodeChar(binaryToDecimal(x)))
-      .mkString
+    var index = 0
+    val inputLength = fromBytes.length
+    val result = new StringBuilder
+    var inserted = 0
 
-    encoded + "=" * ((4 - encoded.length % 4) % 4) grouped(76) mkString "\n"
+    while (index < inputLength) {
+      val b1: Int = 0xFF & fromBytes(index)
+      val b2: Int = 0xFF & (if (index + 1 >= inputLength) 0 else fromBytes(index + 1))
+      val b3: Int = 0xFF & (if (index + 2 >= inputLength) 0 else fromBytes(index + 2))
+
+      val c1 = encodeTable.charAt(b1 >> 2)
+      val c2 = encodeTable.charAt(((b1 & 0x03) << 4) | (b2 >> 4))
+      val c3 = (if (index + 1 >= inputLength) '=' else encodeTable.charAt(((b2 & 0x0F) << 2) | (b3 >> 6)))
+      val c4 = (if (index + 2 >= inputLength) '=' else encodeTable.charAt(b3 & 0x3F))
+      result.append(c1)
+      result.append(c2)
+      result.append(c3)
+      result.append(c4)
+
+      inserted += 4
+      if (inserted % 76 == 0) result.append('\n')
+      index += 3
+    }
+    result.toString
   }
 
   def encodeChar(i: Int) :Char = encodeTable(i)
@@ -48,15 +66,58 @@ object Base64 {
   }
 
   def decode(src: String) :Seq[Byte] = {
-    val BIT_LENGTH = 8
+    var index = 0
+    val srcLength = src.length
+    var result = scala.collection.mutable.MutableList[Byte]()
 
-    val indexSeq =
-      getEncodeTableIndexList(src.filterNot(_ == '\n'))
-      .map(x => toBinarySeq(6)(Seq.fill(1)(x.toByte)))
+    while (index < srcLength) {
+      var c1: Char = '\n'
+      var c2: Char = '\n'
+      var c3: Char = '\n'
+      var c4: Char = '\n'
 
-    deleteExtraZero(indexSeq.flatMap(s => s))
-    .grouped(BIT_LENGTH)
-    .map(binaryToDecimal(_).toByte).toSeq
+      while (index < srcLength && c1 == '\n') {
+        c1 = src.charAt(index)
+        index += 1
+      } 
+
+      while (index < srcLength && c2 == '\n') {
+        c2 = src.charAt(index)
+        index += 1
+      } 
+
+      while (index < srcLength && c3 == '\n') {
+        c3 = src.charAt(index)
+        index += 1
+      } 
+
+      while (index < srcLength && c4 == '\n') {
+        c4 = src.charAt(index)
+        index += 1
+      } 
+
+      if (c4 != '\n') { // success read
+        val i1: Int = encodeTable.indexOf(c1)
+        val i2: Int = encodeTable.indexOf(c2)
+        val i3: Int = (if (c3 == '=') 0 else encodeTable.indexOf(c3))
+        val i4: Int = (if (c4 == '=') 0 else encodeTable.indexOf(c4))
+
+        val b1 = (i1 << 2) | (i2 >>4)
+        val b2 = ((i2 & 0xFF) << 4) | (i3 >> 2)
+        val b3 = ((i3 & 0x03) << 6) | i4
+
+        result += (b1.toByte)
+
+        if (c3 != '=') 
+          result += (b2.toByte) 
+        else {}
+
+        if (c4 != '=')
+          result += (b3.toByte)
+        else {}
+      }
+    }
+    result.toSeq
   }
 
   def deleteExtraZero(s: Seq[Int]): Seq[Int] = {
