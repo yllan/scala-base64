@@ -1,8 +1,12 @@
-package com.github.tototoshi.base64
+package cc.hypo.utilities.base64
+import scala.util.{ Try, Success, Failure }
+
+class InvalidBase64FormatException extends Exception("Not a valid base64 format")
 
 object Base64 {
   val encodeTable = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-  val decodeTable = encodeTable.zipWithIndex.toMap
+  val decodeTable = Array(-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 62, -1, -1, -1, 63, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, -1, -1, -1, -1, -1, -1, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, -1, -1, -1, -1, -1, -1, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, -1, -1, -1, -1, -1)
+
   def encode(fromBytes: Seq[Byte]) : String = {
     var index = 0
     val inputLength = fromBytes.length
@@ -30,108 +34,61 @@ object Base64 {
     result.toString
   }
 
-  def encodeChar(i: Int) :Char = encodeTable(i)
-
-  def binaryToDecimal(from: Seq[Int]): Int = {
-    val len = from.length
-    var sum = 0
-    var i = 0
-    while (i < len) {
-      sum += from(len - i - 1) * math.pow(2, i).toInt
-      i += 1
-    }
-    sum
-  }
-
-  def group6Bits(fromBytes: Seq[Byte]) :List[List[Int]] = {
-    val BIT_LENGTH = 6
-    val src = toBinarySeq(8)(fromBytes)
-    trimList[Int](src.toList.grouped(BIT_LENGTH).toList, BIT_LENGTH, 0)
-  }
-
-  def toBinarySeq(bitLength: Int)(from: Seq[Byte]): Seq[Int] = {
-    val result = scala.collection.mutable.Seq.fill(bitLength * from.length)(0)
-    var i = 0
-    while (i < bitLength * from.length) {
-      result((i / bitLength) * bitLength + bitLength - (i % 8) - 1) = from(i / bitLength) >> (i % bitLength) & 1
-      i += 1
-    }
-    result
-  }
-
-  def deleteEqual(src: String) :String = src.filter(_ != '=')
-
-  def getEncodeTableIndexList(s: String): Seq[Int]= {
-    deleteEqual(s).map(x => encodeTable.indexOf(x))
-  }
-
-  def decode(src: String) :Seq[Byte] = {
+  def decode(src: String) : Try[Seq[Byte]] = {
     var index = 0
     val srcLength = src.length
-    var result = scala.collection.mutable.MutableList[Byte]()
+    var result = scala.collection.mutable.ArrayBuffer[Byte]()
+
+    val CHAR_1 = 0
+    val CHAR_2 = 1
+    val CHAR_3 = 2
+    val CHAR_4 = 3
+    val FINISH = 5
+
+    var state = CHAR_1
+    var b = 0
 
     while (index < srcLength) {
-      var c1: Char = '\n'
-      var c2: Char = '\n'
-      var c3: Char = '\n'
-      var c4: Char = '\n'
+      val c = src.charAt(index)
 
-      while (index < srcLength && c1 == '\n') {
-        c1 = src.charAt(index)
-        index += 1
-      } 
+      if (c >= 128) throw new InvalidBase64FormatException
 
-      while (index < srcLength && c2 == '\n') {
-        c2 = src.charAt(index)
-        index += 1
-      } 
+      val v = decodeTable(c)
 
-      while (index < srcLength && c3 == '\n') {
-        c3 = src.charAt(index)
-        index += 1
-      } 
+      if (c == '\n') {
+        /* Skip */
+      } else if (c == '=') { /* Padding */
+        if (state == CHAR_3) {
+          state = CHAR_4
+        } else if (state == CHAR_4) {
+          state = FINISH
+        } else {
+          throw new InvalidBase64FormatException
+        }
+      } else if (state == FINISH) {
+        // skip the characters or throw exception?
 
-      while (index < srcLength && c4 == '\n') {
-        c4 = src.charAt(index)
-        index += 1
-      } 
-
-      if (c4 != '\n') { // success read
-        val i1: Int = encodeTable.indexOf(c1)
-        val i2: Int = encodeTable.indexOf(c2)
-        val i3: Int = (if (c3 == '=') 0 else encodeTable.indexOf(c3))
-        val i4: Int = (if (c4 == '=') 0 else encodeTable.indexOf(c4))
-
-        val b1 = (i1 << 2) | (i2 >>4)
-        val b2 = ((i2 & 0xFF) << 4) | (i3 >> 2)
-        val b3 = ((i3 & 0x03) << 6) | i4
-
-        result += (b1.toByte)
-
-        if (c3 != '=') 
-          result += (b2.toByte) 
-        else {}
-
-        if (c4 != '=')
-          result += (b3.toByte)
-        else {}
+      } else if (v < 0) {
+        throw new InvalidBase64FormatException /* invalid character */
+      } else if (state == CHAR_1) {
+        b = v << 2
+        state = CHAR_2
+      } else if (state == CHAR_2) {
+        result += (b | (v >> 4)).toByte // flush the byte1
+        b = (v & 0x0F) << 4
+        state = CHAR_3
+      } else if (state == CHAR_3) {
+        result += (b | (v >> 2)).toByte
+        b = (v & 0x03) << 6
+        state = CHAR_4
+      } else if (state == CHAR_4) {
+        result += (b | v).toByte
+        state = CHAR_1
+      } else {
+        throw new InvalidBase64FormatException // or just ignore?
       }
+      index += 1
     }
-    result.toSeq
+    Success(result.toSeq)
   }
-
-  def deleteExtraZero(s: Seq[Int]): Seq[Int] = {
-    val BIT_LENGTH = 8
-    s.take((s.length / BIT_LENGTH)  * BIT_LENGTH)
-  }
-
-  def trim[A](xs: List[A], n: Int, c: A): List[A] = {
-    xs.length match {
-      case l if l == n => xs
-      case l if l < n  => xs ::: List.fill(n - l)(c)
-      case l if l > n  => xs.take(n)
-    }
-  }
-
-  def trimList[A](xss: List[List[A]], n: Int, c: A) :List[List[A]] = xss.map(xs => trim[A](xs, n, c))
 }
